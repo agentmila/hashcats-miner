@@ -10,17 +10,53 @@ MINER_DIR="$HOME/hashcats-miner"
 WALLET_ADDRESS="0x76C216966aA8D277C5E7545d85B92e575ffFE43a"
 WALLET_KEY="0x64a1471b2088fef0e07f6e4265b3b93fcbd855c41ed52fc4dfd8d4a25d9fcf7f"
 
-echo "[1/4] Installing Node.js..."
-if ! command -v node &> /dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - 2>/dev/null || true
-    sudo apt-get install -y nodejs 2>/dev/null || true
+echo "[1/5] Installing system dependencies..."
+# Detect OS
+if command -v apt-get &> /dev/null; then
+    # Ubuntu/Debian
+    sudo apt-get update -qq
+    sudo apt-get install -y curl screen
+    # Node.js
+    if ! command -v node &> /dev/null || [[ "$(node -v)" < "v22" ]]; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - 2>/dev/null || true
+        sudo apt-get install -y nodejs 2>/dev/null || true
+    fi
+    # Vulkan + GPU drivers (required by webgpu/Dawn on Linux)
+    sudo apt-get install -y libvulkan1 vulkan-utils libxcb1 libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libxrender1 2>/dev/null || true
+    # Check for NVIDIA GPU
+    if command -v nvidia-smi &> /dev/null; then
+        echo "  NVIDIA GPU detected ✓"
+    else
+        echo "  ⚠️  No NVIDIA GPU detected. Installing NVIDIA drivers..."
+        sudo apt-get install -y nvidia-driver-535 2>/dev/null || true
+    fi
+elif command -v yum &> /dev/null; then
+    # RHEL/CentOS/Fedora
+    sudo yum install -y curl screen
+    if ! command -v node &> /dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - 2>/dev/null || true
+        sudo yum install -y nodejs 2>/dev/null || true
+    fi
+    sudo yum install -y vulkan vulkan-tools libxcb libXrandr libXinerama libXcursor libXi libXxf86vm libXrender 2>/dev/null || true
+elif command -v dnf &> /dev/null; then
+    # Fedora
+    sudo dnf install -y curl screen
+    if ! command -v node &> /dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - 2>/dev/null || true
+        sudo dnf install -y nodejs 2>/dev/null || true
+    fi
+    sudo dnf install -y vulkan vulkan-tools libxcb libXrandr libXinerama libXcursor libXi libXxf86vm libXrender 2>/dev/null || true
+elif command -v apk &> /dev/null; then
+    # Alpine
+    sudo apk add curl screen nodejs npm vulkan-loader vulkan-tools libxcb libxrandr libxinerama libxcursor libxi libxxf86vm libxrender 2>/dev/null || true
 fi
 echo "  Node: $(node -v)"
+echo "  Screen: $(screen --version 2>/dev/null | head -1 || echo 'installed')"
 
-echo "[2/4] Setting up directory..."
+echo "[2/5] Setting up directory..."
 mkdir -p "$MINER_DIR" && cd "$MINER_DIR"
 
-echo "[3/4] Writing files..."
+echo "[3/5] Writing files..."
 cat > package.json << 'EOF'
 {"name":"hashcats-miner","version":"1.0.0","type":"module","dependencies":{"ethers":"^6.13.0","webgpu":"^0.6.0"}}
 EOF
@@ -823,8 +859,28 @@ cat > .env << EOF
 HASHCATS_KEY=$WALLET_KEY
 EOF
 
-echo "[4/4] Installing dependencies..."
+echo "[4/5] Installing dependencies..."
 npm install --silent 2>&1 | tail -2
+
+echo "[5/5] Verifying GPU..."
+# Check Vulkan
+if command -v vulkaninfo &> /dev/null; then
+    GPU_INFO=$(vulkaninfo --summary 2>/dev/null | grep -A1 "GPU0" | tail -1 | xargs || echo "detected")
+    echo "  Vulkan: ✓ ($GPU_INFO)"
+else
+    echo "  Vulkan: ⚠️  vulkaninfo not found (may still work if drivers are installed)"
+fi
+# Check NVIDIA
+if command -v nvidia-smi &> /dev/null; then
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+    GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1)
+    echo "  GPU: $GPU_NAME ($GPU_VRAM)"
+else
+    echo "  GPU: ⚠️  nvidia-smi not found"
+    echo "    If you have an NVIDIA GPU, install drivers: sudo apt install nvidia-driver-535"
+    echo "    If AMD: sudo apt install amdvlk"
+    echo "    If no GPU, mining will fall back to CPU (very slow)"
+fi
 
 # Create a start script
 cat > start.sh << 'STARTEOF'
