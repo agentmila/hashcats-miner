@@ -826,15 +826,86 @@ EOF
 echo "[4/4] Installing dependencies..."
 npm install --silent 2>&1 | tail -2
 
+# Create a start script
+cat > start.sh << 'STARTEOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "Starting Hashcats GPU Miner..."
+echo "Press Ctrl+C to stop"
+echo ""
+node miner.mjs "$@"
+STARTEOF
+chmod +x start.sh
+
+# Create a stop script
+cat > stop.sh << 'STOPEOF'
+#!/bin/bash
+pkill -f "node miner.mjs" 2>/dev/null && echo "Miner stopped." || echo "Miner not running."
+screen -X -S hashcats quit 2>/dev/null || true
+STOPEOF
+chmod +x stop.sh
+
+# Create a status script
+cat > status.sh << 'STATUSEOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "=== HASHCATS MINER STATUS ==="
+echo ""
+# Check if running
+if pgrep -f "node miner.mjs" > /dev/null; then
+    echo "Status: RUNNING"
+else
+    echo "Status: STOPPED"
+fi
+echo ""
+# Check wallet balance
+node -e "
+import { ethers } from 'ethers';
+const provider = new ethers.JsonRpcProvider('https://robinhood.drpc.org');
+const addr = '0x76C216966aA8D277C5E7545d85B92e575ffFE43a';
+const bal = await provider.getBalance(addr);
+console.log('Wallet:', addr);
+console.log('Balance:', ethers.formatEther(bal), 'ETH');
+if (bal > 0n) {
+    const cats = Number(bal) / 0.021e18;
+    console.log('Can mine ~' + Math.floor(cats) + ' cats');
+} else {
+    console.log('⚠️  No ETH — fund this address on Robinhood Chain first!');
+}
+" 2>/dev/null
+echo ""
+echo "RPC: https://robinhood.drpc.org"
+echo "Explorer: https://robinhoodchain.blockscout.com/address/0x76C216966aA8D277C5E7545d85B92e575ffFE43a"
+STATUSEOF
+chmod +x status.sh
+
 echo ""
 echo "  ✅ SETUP COMPLETE!"
 echo ""
-echo "  Wallet: $WALLET_ADDRESS"
-echo "  Files:  $MINER_DIR"
+echo "  Wallet:  $WALLET_ADDRESS"
+echo "  Files:   $MINER_DIR"
 echo ""
-echo "  NEXT STEPS:"
-echo "  1. Fund wallet with ETH on Robinhood Chain"
-echo "  2. Test:  cd $MINER_DIR && node miner.mjs --dry-run"
-echo "  3. Mine:  cd $MINER_DIR && node miner.mjs"
-echo "  4. Screen: screen -S hashcats 'node miner.mjs'"
+echo "  ┌─────────────────────────────────────────────────────────┐"
+echo "  │  FUND WALLET (needed before mining)                    │"
+echo "  │                                                         │"
+echo "  │  Send ETH to: $WALLET_ADDRESS    │"
+echo "  │                                                         │"
+echo "  │  Chain: Robinhood Chain (ID 4663)                       │"
+echo "  │  RPC:   https://robinhood.drpc.org                      │"
+echo "  │                                                         │"
+echo "  │  How to fund:                                           │"
+echo "  │  • Robinhood app → Wallet → Send crypto                 │"
+echo "  │  • Or any Web3 wallet with custom RPC (MetaMask, etc)   │"
+echo "  │  • Need ~0.05 ETH (mines ~2 cats)                      │"
+echo "  └─────────────────────────────────────────────────────────┘"
+echo ""
+echo "  COMMANDS:"
+echo "    ./start.sh --dry-run   # Test (no TX)"
+echo "    ./start.sh             # Mine for real"
+echo "    ./status.sh            # Check balance + status"
+echo "    ./stop.sh              # Stop miner"
+echo ""
+echo "  Or with screen (survives SSH disconnect):"
+echo "    screen -S hashcats './start.sh'"
+echo "    # Ctrl+A D to detach, screen -r hashcats to reattach"
 echo ""
